@@ -544,13 +544,9 @@ async function saveLog(){
   };
   const key = `joblog:${date}_${foreman}_${job}`.replace(/\s+/g,'_');
   try{
-    const result = await window.storage.set(key, JSON.stringify(entry));
-    if(result){
-      status.textContent = `Saved: ${job} — ${foreman} — ${date}. (Phase 1: local only)`;
-      loadHistory();
-    } else {
-      status.textContent = 'Save failed — storage returned no result.';
-    }
+    localStorage.setItem(key, JSON.stringify(entry));
+    status.textContent = `Saved: ${job} — ${foreman} — ${date}. (Phase 1: local only)`;
+    loadHistory();
   }catch(err){
     status.textContent = 'Save error: ' + err.message;
   }
@@ -578,12 +574,16 @@ document.getElementById('newLogBtn').addEventListener('click', clearForm);
 async function loadHistory(){
   const histDiv = document.getElementById('historyList');
   try{
-    const result = await window.storage.list('joblog:');
-    if(!result || !result.keys || result.keys.length === 0){
+    const keys = [];
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(k && k.startsWith('joblog:')) keys.push(k);
+    }
+    if(keys.length === 0){
       histDiv.innerHTML = '<div class="empty">No saved logs yet.</div>';
       return;
     }
-    const keys = result.keys.sort().reverse();
+    keys.sort().reverse();
     histDiv.innerHTML = '';
     for(const key of keys){
       const row = document.createElement('div');
