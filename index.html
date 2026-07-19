@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>PLS Daily Job Log</title>
+
+<!-- PWA / installability -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PLS Job Log">
+<meta name="theme-color" content="#23262B">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="data:application/manifest+json,{%22name%22:%22PLS%20Daily%20Job%20Log%22,%22short_name%22:%22PLS%20Log%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22%23DAD7CC%22,%22theme_color%22:%22%2323262B%22,%22icons%22:[{%22src%22:%22icon-192.png%22,%22sizes%22:%22192x192%22,%22type%22:%22image/png%22},{%22src%22:%22icon-512.png%22,%22sizes%22:%22512x512%22,%22type%22:%22image/png%22}]}">
+
+<style>
+  :root{
+    --paper:#E7E5DD;
+    --paper-dark:#DAD7CC;
+    --ink:#23262B;
+    --ink-soft:#5B5F66;
+    --orange:#FF6A13;
+    --orange-dark:#C7500A;
+    --yellow:#F2B705;
+    --green:#3A7D44;
+    --red:#C1401F;
+    --line:#B9B6AC;
+    --card:#F3F1EA;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper-dark);
+    font-family: 'Courier New', ui-monospace, SFMono-Regular, Menlo, monospace;
+    color:var(--ink);
+    padding:20px 12px 60px;
+  }
+  .ticket{
+    max-width:720px;
+    margin:0 auto;
+    background:var(--paper);
+    border:1px solid var(--line);
+    box-shadow:0 2px 0 var(--line), 0 6px 18px rgba(0,0,0,0.15);
+  }
+  .head{
+    background:var(--ink);
+    color:var(--paper);
+    padding:18px 20px 14px;
+    position:relative;
+    overflow:hidden;
+  }
+  .head::after{
+    content:"";
+    position:absolute;
+    left:0;right:0;bottom:0;
+    height:6px;
+    background:repeating-linear-gradient(45deg,var(--orange) 0 10px,var(--ink) 10px 20px);
+  }
+  .head h1{
+    font-family: Impact, 'Arial Narrow', sans-serif;
+    font-weight:400;
+    letter-spacing:1px;
+    font-size:26px;
+    margin:0 0 2px;
+    text-transform:uppercase;
+  }
+  .head .sub{
+    font-size:11px;
+    color:#B9B6AC;
+    text-transform:uppercase;
+    letter-spacing:2px;
+  }
+  .perf{
+    display:flex;
+    justify-content:space-between;
+    padding:0 14px;
+    background:var(--paper);
+    height:14px;
+    align-items:center;
+  }
+  .perf span{
+    width:8px;height:8px;border-radius:50%;
+    background:var(--paper-dark);
+    box-shadow:inset 0 0 0 1px var(--line);
+  }
+  .body{ padding:18px 20px 24px; }
+  .row{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px;}
+  .field{ flex:1; min-width:140px; }
+  label{
+    display:block;
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:1.5px;
+    color:var(--ink-soft);
+    margin-bottom:4px;
+    font-family: Arial, sans-serif;
+    font-weight:700;
+  }
+  input[type=text], input[type=date], textarea, select{
+    width:100%;
+    border:1px solid var(--line);
+    background:var(--card);
+    padding:8px 9px;
+    font-family:inherit;
+    font-size:13px;
+    color:var(--ink);
+    border-radius:2px;
+    -webkit-appearance:none;
+    appearance:none;
+  }
+  textarea{resize:vertical; min-height:60px;}
+  .job-info{
+    background:var(--card);
+    border:1px dashed var(--line);
+    border-radius:2px;
+    padding:10px 12px;
+    margin-bottom:14px;
+    font-size:12px;
+    display:none;
+  }
+  .job-info.show{ display:block; }
+  .job-info .jrow{ display:flex; justify-content:space-between; padding:2px 0; }
+  .job-info .jlabel{ color:var(--ink-soft); text-transform:uppercase; font-size:10px; letter-spacing:1px; font-family:Arial,sans-serif;}
+  .weather-strip{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    background:var(--ink);
+    color:var(--paper);
+    padding:12px 14px;
+    border-radius:3px;
+    margin-bottom:16px;
+    flex-wrap:wrap;
+  }
+  .weather-strip .temp{
+    font-family: Impact, sans-serif;
+    font-size:34px;
+    color:var(--orange);
+    line-height:1;
+  }
+  .weather-strip .wdesc{ font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#B9B6AC;}
+  .weather-strip .loc{ font-size:11px; color:#B9B6AC; margin-top:2px;}
+  .btn{
+    background:var(--orange);
+    color:#1A1300;
+    border:none;
+    padding:8px 14px;
+    font-family: Arial, sans-serif;
+    font-weight:700;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    cursor:pointer;
+    border-radius:2px;
+  }
+  .btn:hover{ background:var(--orange-dark); color:#fff;}
+  .btn.ghost{ background:transparent; color:var(--ink); box-shadow:inset 0 0 0 1px var(--line);}
+  .btn.small{ padding:5px 9px; font-size:10px;}
+  .section-title{
+    font-family: Impact, 'Arial Narrow', sans-serif;
+    font-size:16px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    margin:22px 0 8px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .section-title::before{
+    content:"";
+    width:10px;height:10px;
+    background:var(--orange);
+  }
+  .task-row, .prob-row{
+    display:flex;
+    gap:8px;
+    align-items:flex-start;
+    background:var(--card);
+    border:1px solid var(--line);
+    padding:8px;
+    margin-bottom:6px;
+    border-radius:2px;
+  }
+  .task-row input[type=checkbox]{ margin-top:3px; width:16px; height:16px; accent-color:var(--orange);}
+  .task-row.done span.tlabel{ text-decoration:line-through; color:var(--ink-soft);}
+  .task-row span.tlabel{ flex:1; font-size:13px; padding-top:2px;}
+  .prob-row{ flex-direction:column; }
+  .prob-row .tag{
+    display:inline-block;
+    font-size:9px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    padding:2px 6px;
+    border-radius:2px;
+    margin-bottom:4px;
+    width:fit-content;
+    font-family:Arial,sans-serif;
+  }
+  .tag.open{ background:var(--red); color:#fff; }
+  .tag.resolved{ background:var(--green); color:#fff; }
+  .prob-row .ptext{ font-size:13px; margin-bottom:4px;}
+  .prob-row .sol{ font-size:12px; color:var(--ink-soft); border-left:2px solid var(--green); padding-left:8px;}
+  .del{ background:none; border:none; color:var(--ink-soft); cursor:pointer; font-size:14px; }
+  .add-row{ display:flex; gap:6px; margin-top:6px; }
+  .add-row input{ flex:1; }
+  .add-row textarea{ flex:1; min-height:40px; }
+  footer.actions{
+    display:flex; gap:10px; margin-top:24px; padding-top:16px; border-top:1px dashed var(--line);
+    flex-wrap:wrap;
+  }
+  .history{
+    max-width:720px; margin:16px auto 0; background:var(--paper);
+    border:1px solid var(--line); padding:14px 20px;
+  }
+  .history h2{
+    font-family: Impact, sans-serif; font-size:15px; text-transform:uppercase; letter-spacing:1px; margin:0 0 10px;
+  }
+  .hist-item{
+    display:flex; justify-content:space-between; align-items:center;
+    font-size:12px; padding:6px 0; border-bottom:1px solid var(--line);
+  }
+  .status-msg{ font-size:11px; color:var(--ink-soft); margin-top:8px; font-family: Arial, sans-serif;}
+  .empty{ font-size:12px; color:var(--ink-soft); font-family:Arial,sans-serif; }
+  .phase-note{
+    background:#FFF6E5; border:1px solid var(--yellow); color:#6b5000;
+    font-size:11px; font-family:Arial,sans-serif; padding:8px 12px; border-radius:2px; margin-bottom:14px;
+  }
+  .new-job-row{ display:none; margin-top:8px; }
+  .new-job-row.show{ display:flex; gap:6px; }
+</style>
+</head>
+<body>
+
+<div class="ticket">
+  <div class="head">
+    <h1>PLS Daily Job Log</h1>
+    <div class="sub">Plumb Level Services — Field Ticket</div>
+  </div>
+  <div class="perf">
+    <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+  </div>
+
+  <div class="body">
+    <div class="phase-note">
+      Phase 1 build — saves to this device only right now. Once hosted with Drive access set up, entries will save directly to <strong>03 Active Jobs / [Job] / 08 Job Logs</strong> in the PLS vault.
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>Date</label>
+        <input type="date" id="logDate">
+      </div>
+      <div class="field">
+        <label>Foreman</label>
+        <select id="foreman">
+          <option value="">Select...</option>
+          <option value="Mike">Mike</option>
+          <option value="Kyler">Kyler</option>
+          <option value="John">John</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field" style="flex:2;">
+        <label>Job</label>
+        <select id="jobSelect">
+          <option value="">Select a job...</option>
+        </select>
+        <div class="new-job-row" id="newJobRow">
+          <input type="text" id="newJobName" placeholder="New job name (e.g. PO# - Job Name)">
+          <button class="btn small" id="addJobBtn">Add</button>
+        </div>
+      </div>
+    </div>
+    <button class="btn ghost small" id="toggleNewJob" style="margin:-8px 0 14px;">+ New job not on this list</button>
+
+    <div class="job-info" id="jobInfo">
+      <div class="jrow"><span class="jlabel">PO#</span><span id="jiPO">—</span></div>
+      <div class="jrow"><span class="jlabel">GC</span><span id="jiGC">—</span></div>
+      <div class="jrow"><span class="jlabel">Owner</span><span id="jiOwner">—</span></div>
+      <div class="jrow"><span class="jlabel">Location</span><span id="jiLoc">—</span></div>
+    </div>
+
+    <div class="weather-strip">
+      <div>
+        <div class="temp" id="wTemp">--°</div>
+      </div>
+      <div>
+        <div class="wdesc" id="wDesc">No weather yet</div>
+        <div class="loc" id="wLoc">Location not set</div>
+      </div>
+      <button class="btn small" id="pullWeatherBtn" style="margin-left:auto;">Pull Location + Weather</button>
+    </div>
+
+    <div class="section-title">Crew Notes</div>
+    <textarea id="crewNotes" placeholder="Who's on site, hours, equipment used, deliveries, subs on-site..."></textarea>
+
+    <div class="section-title">Tasks</div>
+    <div id="taskList"></div>
+    <div class="add-row">
+      <input type="text" id="newTask" placeholder="Add a task...">
+      <button class="btn small" id="addTaskBtn">Add</button>
+    </div>
+
+    <div class="section-title">Problems &amp; Solutions</div>
+    <div id="probList"></div>
+    <div class="add-row" style="flex-direction:column;">
+      <textarea id="newProblem" placeholder="Describe the problem..."></textarea>
+      <textarea id="newSolution" placeholder="Solution / fix / plan (leave blank if still open)..."></textarea>
+      <button class="btn small" id="addProbBtn" style="align-self:flex-start;">Add Entry</button>
+    </div>
+
+    <footer class="actions">
+      <button class="btn" id="saveBtn">Save Today's Log</button>
+      <button class="btn ghost" id="newLogBtn">Clear / New Log</button>
+    </footer>
+    <div class="status-msg" id="statusMsg"></div>
+  </div>
+</div>
+
+<div class="history">
+  <h2>Past Logs (this device)</h2>
+  <div id="historyList"><div class="empty">No saved logs yet.</div></div>
+</div>
+
+<script>
+// ---------- Job list (mirrors 03 Active Jobs in the PLS vault, as of 2026-07-12) ----------
+// Phase 2: replace this static list with a live read of the Drive folder.
+const JOBS = [
+  { name:"26010 - McGill Park Phase 2", po:"26010", gc:"Tucson, Inc.", owner:"City of Canal Winchester", loc:"Canal Winchester, OH" },
+  { name:"25005 - Wooster-Sterling Wastewater", po:"25005", gc:"Tucson, Inc.", owner:"Wayne Co. Board of Commissioners", loc:"Sterling, OH" },
+  { name:"25017 - Coshocton Warsaw Booster", po:"25017", gc:"Tucson, Inc.", owner:"City of Coshocton", loc:"Coshocton, OH" },
+  { name:"25-105-13 - Warsaw-Riverview Water Tower", po:"25-105-13", gc:"Tucson, Inc.", owner:"City of Coshocton", loc:"Coshocton, OH" },
+  { name:"25019 - Caldwell Raw Water Dosing Station", po:"25019", gc:"Dunlap", owner:"Village of Caldwell", loc:"Caldwell, OH" },
+  { name:"26020 - Union Williams Waverly", po:"26020", gc:"Dunlap", owner:"Union Williams PSD", loc:"Waverly, WV" },
+  { name:"26015 - Chaseville Tank", po:"26015", gc:"Dunlap", owner:"Noble County Water Authority", loc:"Buffalo Township, OH" },
+  { name:"26003 - Valley Falls Water System Improvements", po:"26003", gc:"RDR", owner:"Valley Falls PSD", loc:"Marion County, WV" },
+  { name:"26013 - Meigs HS Wet Well Electric Service", po:"26013", gc:"RDR", owner:"Village of Pomeroy", loc:"Pomeroy, Meigs County, OH" },
+  { name:"26021 - Woodsfield Backwash System Improvements", po:"26021", gc:"RDR", owner:"Village of Woodsfield", loc:"Monroe County, OH" },
+  { name:"26006 - Highland Ridge Waterline Extensions", po:"26006", gc:"RDR", owner:"Highland Ridge Water Association", loc:"Lowell, OH" },
+  { name:"25026 - Jackson County Water Phase 8B", po:"25026", gc:"Little Creek", owner:"Jackson County Water Co.", loc:"Jackson & Vinton Counties, OH" }
+];
+
+let customJobs = [];
+let tasks = [];
+let problems = [];
+let coords = null;
+
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+document.getElementById('logDate').value = todayStr();
+
+function populateJobs(){
+  const sel = document.getElementById('jobSelect');
+  sel.innerHTML = '<option value="">Select a job...</option>';
+  [...JOBS, ...customJobs].forEach(j => {
+    const opt = document.createElement('option');
+    opt.value = j.name;
+    opt.textContent = j.name;
+    sel.appendChild(opt);
+  });
+}
+populateJobs();
+
+document.getElementById('toggleNewJob').addEventListener('click', () => {
+  document.getElementById('newJobRow').classList.toggle('show');
+});
+
+document.getElementById('addJobBtn').addEventListener('click', () => {
+  const name = document.getElementById('newJobName').value.trim();
+  if(!name) return;
+  const newJob = { name, po:'TBD', gc:'TBD', owner:'TBD', loc:'TBD' };
+  customJobs.push(newJob);
+  populateJobs();
+  document.getElementById('jobSelect').value = name;
+  document.getElementById('newJobName').value = '';
+  document.getElementById('newJobRow').classList.remove('show');
+  showJobInfo(newJob);
+  document.getElementById('statusMsg').textContent = 'New job added locally — Phase 2 will create the full vault skeleton (00 Project Home, 01 Command Sheet, 08 Job Logs) automatically in Drive.';
+});
+
+function showJobInfo(job){
+  const box = document.getElementById('jobInfo');
+  if(!job){ box.classList.remove('show'); return; }
+  document.getElementById('jiPO').textContent = job.po;
+  document.getElementById('jiGC').textContent = job.gc;
+  document.getElementById('jiOwner').textContent = job.owner;
+  document.getElementById('jiLoc').textContent = job.loc;
+  box.classList.add('show');
+}
+
+document.getElementById('jobSelect').addEventListener('change', e => {
+  const job = [...JOBS, ...customJobs].find(j => j.name === e.target.value);
+  showJobInfo(job);
+});
+
+// ---------- Tasks ----------
+function renderTasks(){
+  const list = document.getElementById('taskList');
+  list.innerHTML = '';
+  if(tasks.length === 0){
+    list.innerHTML = '<div class="empty">No tasks yet.</div>';
+    return;
+  }
+  tasks.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'task-row' + (t.done ? ' done' : '');
+    row.innerHTML = `
+      <input type="checkbox" ${t.done ? 'checked' : ''} data-i="${i}" class="taskChk">
+      <span class="tlabel">${escapeHtml(t.text)}</span>
+      <button class="del" data-i="${i}" title="Remove">✕</button>
+    `;
+    list.appendChild(row);
+  });
+  list.querySelectorAll('.taskChk').forEach(cb => {
+    cb.addEventListener('change', e => {
+      tasks[+e.target.dataset.i].done = e.target.checked;
+      renderTasks();
+    });
+  });
+  list.querySelectorAll('.del').forEach(btn => {
+    btn.addEventListener('click', e => {
+      tasks.splice(+e.target.dataset.i, 1);
+      renderTasks();
+    });
+  });
+}
+document.getElementById('addTaskBtn').addEventListener('click', () => {
+  const input = document.getElementById('newTask');
+  if(input.value.trim() === '') return;
+  tasks.push({text: input.value.trim(), done:false});
+  input.value = '';
+  renderTasks();
+});
+document.getElementById('newTask').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ document.getElementById('addTaskBtn').click(); }
+});
+
+// ---------- Problems ----------
+function renderProblems(){
+  const list = document.getElementById('probList');
+  list.innerHTML = '';
+  if(problems.length === 0){
+    list.innerHTML = '<div class="empty">No issues logged.</div>';
+    return;
+  }
+  problems.forEach((p, i) => {
+    const row = document.createElement('div');
+    row.className = 'prob-row';
+    const resolved = p.solution && p.solution.trim() !== '';
+    row.innerHTML = `
+      <div style="display:flex; justify-content:space-between; width:100%;">
+        <span class="tag ${resolved ? 'resolved' : 'open'}">${resolved ? 'Resolved' : 'Open'}</span>
+        <button class="del" data-i="${i}" title="Remove">✕</button>
+      </div>
+      <div class="ptext">${escapeHtml(p.problem)}</div>
+      ${resolved ? `<div class="sol">${escapeHtml(p.solution)}</div>` : ''}
+    `;
+    list.appendChild(row);
+  });
+  list.querySelectorAll('.del').forEach(btn => {
+    btn.addEventListener('click', e => {
+      problems.splice(+e.target.dataset.i, 1);
+      renderProblems();
+    });
+  });
+}
+document.getElementById('addProbBtn').addEventListener('click', () => {
+  const pInput = document.getElementById('newProblem');
+  const sInput = document.getElementById('newSolution');
+  if(pInput.value.trim() === '') return;
+  problems.push({problem: pInput.value.trim(), solution: sInput.value.trim()});
+  pInput.value = '';
+  sInput.value = '';
+  renderProblems();
+});
+
+function escapeHtml(str){
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// ---------- Weather / Location ----------
+function weatherCodeToText(code){
+  const map = {
+    0:'Clear sky',1:'Mainly clear',2:'Partly cloudy',3:'Overcast',
+    45:'Fog',48:'Rime fog',
+    51:'Light drizzle',53:'Drizzle',55:'Heavy drizzle',
+    61:'Light rain',63:'Rain',65:'Heavy rain',
+    71:'Light snow',73:'Snow',75:'Heavy snow',
+    80:'Rain showers',81:'Rain showers',82:'Violent showers',
+    95:'Thunderstorm',96:'Thunderstorm w/ hail',99:'Severe thunderstorm'
+  };
+  return map[code] || 'Unknown conditions';
+}
+document.getElementById('pullWeatherBtn').addEventListener('click', () => {
+  const status = document.getElementById('statusMsg');
+  if(!navigator.geolocation){
+    status.textContent = 'Geolocation not supported by this browser.';
+    return;
+  }
+  status.textContent = 'Getting location...';
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+    document.getElementById('wLoc').textContent = `${coords.lat.toFixed(3)}, ${coords.lon.toFixed(3)}`;
+    status.textContent = 'Pulling weather...';
+    try{
+      const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current_weather=true&temperature_unit=fahrenheit&windspeed_unit=mph`);
+      const data = await res.json();
+      const cw = data.current_weather;
+      document.getElementById('wTemp').textContent = Math.round(cw.temperature) + '°F';
+      document.getElementById('wDesc').textContent = weatherCodeToText(cw.weathercode) + ' · Wind ' + Math.round(cw.windspeed) + ' mph';
+      status.textContent = 'Weather updated ' + new Date().toLocaleTimeString();
+    }catch(err){
+      status.textContent = 'Weather pull failed — check connection.';
+    }
+  }, (err) => {
+    status.textContent = 'Location blocked or unavailable: ' + err.message;
+  }, {enableHighAccuracy:true, timeout:10000});
+});
+
+// ---------- Save / Storage (Phase 1: window.storage stand-in for Drive) ----------
+async function saveLog(){
+  const status = document.getElementById('statusMsg');
+  const date = document.getElementById('logDate').value || todayStr();
+  const foreman = document.getElementById('foreman').value;
+  const job = document.getElementById('jobSelect').value;
+  if(!foreman){ status.textContent = 'Select a foreman before saving.'; return; }
+  if(!job){ status.textContent = 'Select a job before saving.'; return; }
+
+  const entry = {
+    date, foreman, job,
+    weather: {
+      temp: document.getElementById('wTemp').textContent,
+      desc: document.getElementById('wDesc').textContent,
+      loc: document.getElementById('wLoc').textContent,
+      coords
+    },
+    crewNotes: document.getElementById('crewNotes').value,
+    tasks, problems,
+    savedAt: new Date().toISOString()
+  };
+  const key = `joblog:${date}_${foreman}_${job}`.replace(/\s+/g,'_');
+  try{
+    const result = await window.storage.set(key, JSON.stringify(entry));
+    if(result){
+      status.textContent = `Saved: ${job} — ${foreman} — ${date}. (Phase 1: local only)`;
+      loadHistory();
+    } else {
+      status.textContent = 'Save failed — storage returned no result.';
+    }
+  }catch(err){
+    status.textContent = 'Save error: ' + err.message;
+  }
+}
+document.getElementById('saveBtn').addEventListener('click', saveLog);
+
+function clearForm(){
+  document.getElementById('logDate').value = todayStr();
+  document.getElementById('foreman').value = '';
+  document.getElementById('jobSelect').value = '';
+  document.getElementById('crewNotes').value = '';
+  document.getElementById('wTemp').textContent = '--°';
+  document.getElementById('wDesc').textContent = 'No weather yet';
+  document.getElementById('wLoc').textContent = 'Location not set';
+  showJobInfo(null);
+  coords = null;
+  tasks = [];
+  problems = [];
+  renderTasks();
+  renderProblems();
+  document.getElementById('statusMsg').textContent = 'Cleared. Ready for a new log.';
+}
+document.getElementById('newLogBtn').addEventListener('click', clearForm);
+
+async function loadHistory(){
+  const histDiv = document.getElementById('historyList');
+  try{
+    const result = await window.storage.list('joblog:');
+    if(!result || !result.keys || result.keys.length === 0){
+      histDiv.innerHTML = '<div class="empty">No saved logs yet.</div>';
+      return;
+    }
+    const keys = result.keys.sort().reverse();
+    histDiv.innerHTML = '';
+    for(const key of keys){
+      const row = document.createElement('div');
+      row.className = 'hist-item';
+      const label = key.replace('joblog:', '').replace(/_/g, ' ');
+      row.innerHTML = `<span>${label}</span>`;
+      histDiv.appendChild(row);
+    }
+  }catch(err){
+    histDiv.innerHTML = '<div class="empty">History unavailable.</div>';
+  }
+}
+
+renderTasks();
+renderProblems();
+loadHistory();
+</script>
+
+</body>
+</html>
