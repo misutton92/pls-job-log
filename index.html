@@ -13,6 +13,8 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="manifest" href="data:application/manifest+json,{%22name%22:%22PLS%20Daily%20Job%20Log%22,%22short_name%22:%22PLS%20Log%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22%23DAD7CC%22,%22theme_color%22:%22%2323262B%22,%22icons%22:[{%22src%22:%22icon-192.png%22,%22sizes%22:%22192x192%22,%22type%22:%22image/png%22},{%22src%22:%22icon-512.png%22,%22sizes%22:%22512x512%22,%22type%22:%22image/png%22}]}">
 
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
 <style>
   :root{
     --paper:#E7E5DD;
@@ -228,6 +230,15 @@
   }
   .new-job-row{ display:none; margin-top:8px; }
   .new-job-row.show{ display:flex; gap:6px; }
+  .auth-banner{
+    background:var(--ink); color:var(--paper);
+    padding:12px 14px; border-radius:3px; margin-bottom:16px;
+    display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
+    font-family:Arial,sans-serif; font-size:12px;
+  }
+  .auth-banner.signed-in{ background:var(--green); }
+  .auth-banner .status-dot{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; background:var(--red); }
+  .auth-banner.signed-in .status-dot{ background:#fff; }
 </style>
 </head>
 <body>
@@ -242,8 +253,9 @@
   </div>
 
   <div class="body">
-    <div class="phase-note">
-      Phase 1 build — saves to this device only right now. Once hosted with Drive access set up, entries will save directly to <strong>03 Active Jobs / [Job] / 08 Job Logs</strong> in the PLS vault.
+    <div class="auth-banner" id="authBanner">
+      <span><span class="status-dot"></span><span id="authStatusText">Sign in to save logs to the PLS vault</span></span>
+      <button class="btn small" id="signInBtn">Sign in with Google</button>
     </div>
 
     <div class="row">
@@ -328,6 +340,123 @@
 <script>
 // ---------- Job list (mirrors 03 Active Jobs in the PLS vault, as of 2026-07-12) ----------
 // Phase 2: replace this static list with a live read of the Drive folder.
+// ---------- Google Drive Auth ----------
+const CLIENT_ID = '97797932296-ja2bg03c1k6t02qe6qosnh477s1lm2.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const VAULT_ROOT_ID = '1yCvQNdd1oRagE0zJHzZ-SPNo8wI_tZsq';
+const ACTIVE_JOBS_ID = '1ium-tWWviUjBmCYFyIeWzrDzppgD3xWA';
+let accessToken = null;
+let tokenClient = null;
+let centralLogsFolderId = null;
+
+function setAuthStatus(signedIn, text){
+  const banner = document.getElementById('authBanner');
+  const btn = document.getElementById('signInBtn');
+  document.getElementById('authStatusText').textContent = text;
+  if(signedIn){
+    banner.classList.add('signed-in');
+    btn.textContent = 'Signed in';
+    btn.disabled = true;
+  } else {
+    banner.classList.remove('signed-in');
+    btn.textContent = 'Sign in with Google';
+    btn.disabled = false;
+  }
+}
+
+function initGoogleAuth(){
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: DRIVE_SCOPE,
+    callback: (resp) => {
+      if(resp && resp.access_token){
+        accessToken = resp.access_token;
+        setAuthStatus(true, 'Signed in — logs save to the PLS vault');
+      } else {
+        setAuthStatus(false, 'Sign-in failed — tap to retry');
+      }
+    }
+  });
+  // Try a silent sign-in first (works if this browser already has an active
+  // Google session and previously granted access). Falls back to the button.
+  tokenClient.requestAccessToken({ prompt: '' });
+}
+
+document.getElementById('signInBtn').addEventListener('click', () => {
+  if(tokenClient){ tokenClient.requestAccessToken({ prompt: 'consent' }); }
+});
+
+window.addEventListener('load', () => {
+  // google script loads async — wait briefly for it if needed
+  const tryInit = () => {
+    if(window.google && window.google.accounts){ initGoogleAuth(); }
+    else { setTimeout(tryInit, 300); }
+  };
+  tryInit();
+});
+
+async function driveFetch(url, options = {}){
+  if(!accessToken) throw new Error('Not signed in to Google Drive yet.');
+  options.headers = Object.assign({}, options.headers, { 'Authorization': 'Bearer ' + accessToken });
+  const res = await fetch(url, options);
+  if(!res.ok){
+    const errText = await res.text();
+    throw new Error('Drive API error ' + res.status + ': ' + errText.slice(0,200));
+  }
+  return res.json();
+}
+
+async function findFolder(name, parentId){
+  const q = encodeURIComponent(`'${parentId}' in parents and name = '${name.replace(/'/g,"\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`);
+  const data = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`);
+  return (data.files && data.files[0]) ? data.files[0].id : null;
+}
+
+async function createFolder(name, parentId){
+  const data = await driveFetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
+  });
+  return data.id;
+}
+
+async function findOrCreateFolder(name, parentId){
+  const existing = await findFolder(name, parentId);
+  if(existing) return existing;
+  return await createFolder(name, parentId);
+}
+
+async function createFileInFolder(name, parentId, content, mimeType = 'text/markdown'){
+  const metadata = { name, parents: [parentId], mimeType };
+  const boundary = '-------plsjoblog' + Date.now();
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n${content}\r\n` +
+    `--${boundary}--`;
+  return await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body
+  });
+}
+
+async function getCentralLogsFolder(){
+  if(centralLogsFolderId) return centralLogsFolderId;
+  centralLogsFolderId = await findOrCreateFolder('04 Foreman Daily Logs', VAULT_ROOT_ID);
+  return centralLogsFolderId;
+}
+
+async function createNewJobSkeleton(jobName){
+  const jobFolderId = await createFolder(jobName, ACTIVE_JOBS_ID);
+  await createFileInFolder('00 Project Home.md', jobFolderId,
+    `# ${jobName} | Project Home\n\n## Project Status\n- **Status:** Active Job — new, created from field entry ${todayStr()}\n- Needs full detail pass — this was auto-created from the daily log app, not from the PO tracking sheet.\n\n## Open Items — Action Required Now\n- [ ] Fill in PO#, GC, owner, location, and contacts\n`);
+  await createFileInFolder('01 Project Command Sheet.md', jobFolderId,
+    `# 01 Project Command Sheet\n\n## Current Priority\n1. Fill in real project info — this job was created in the field via the daily log app and has no confirmed details yet.\n`);
+  const logsId = await createFolder('08 Job Logs', jobFolderId);
+  return { jobFolderId, logsId };
+}
+
 const JOBS = [
   { name:"26010 - McGill Park Phase 2", po:"26010", gc:"Tucson, Inc.", owner:"City of Canal Winchester", loc:"Canal Winchester, OH" },
   { name:"25005 - Wooster-Sterling Wastewater", po:"25005", gc:"Tucson, Inc.", owner:"Wayne Co. Board of Commissioners", loc:"Sterling, OH" },
@@ -367,7 +496,7 @@ document.getElementById('toggleNewJob').addEventListener('click', () => {
   document.getElementById('newJobRow').classList.toggle('show');
 });
 
-document.getElementById('addJobBtn').addEventListener('click', () => {
+document.getElementById('addJobBtn').addEventListener('click', async () => {
   const name = document.getElementById('newJobName').value.trim();
   if(!name) return;
   const newJob = { name, po:'TBD', gc:'TBD', owner:'TBD', loc:'TBD' };
@@ -377,7 +506,18 @@ document.getElementById('addJobBtn').addEventListener('click', () => {
   document.getElementById('newJobName').value = '';
   document.getElementById('newJobRow').classList.remove('show');
   showJobInfo(newJob);
-  document.getElementById('statusMsg').textContent = 'New job added locally — Phase 2 will create the full vault skeleton (00 Project Home, 01 Command Sheet, 08 Job Logs) automatically in Drive.';
+  const status = document.getElementById('statusMsg');
+  if(!accessToken){
+    status.textContent = 'New job added locally — sign in with Google to create it in the vault too.';
+    return;
+  }
+  status.textContent = 'Creating job folder in the vault...';
+  try{
+    await createNewJobSkeleton(name);
+    status.textContent = `Job "${name}" created in 03 Active Jobs with a full skeleton (00 Project Home, 01 Command Sheet, 08 Job Logs).`;
+  }catch(err){
+    status.textContent = 'Job added locally, but Drive folder creation failed: ' + err.message;
+  }
 });
 
 function showJobInfo(job){
@@ -522,6 +662,23 @@ document.getElementById('pullWeatherBtn').addEventListener('click', () => {
 });
 
 // ---------- Save / Storage (Phase 1: window.storage stand-in for Drive) ----------
+function entryToMarkdown(entry){
+  const doneTasks = entry.tasks.filter(t => t.done).map(t => `- [x] ${t.text}`).join('\n');
+  const openTasks = entry.tasks.filter(t => !t.done).map(t => `- [ ] ${t.text}`).join('\n');
+  const probs = entry.problems.map(p => {
+    const resolved = p.solution && p.solution.trim() !== '';
+    return `**${resolved ? 'Resolved' : 'Open'}:** ${p.problem}` + (resolved ? `\n> Solution: ${p.solution}` : '');
+  }).join('\n\n');
+  return `# Daily Log — ${entry.date} — ${entry.foreman}\n\n` +
+    `**Job:** ${entry.job}\n` +
+    `**Weather:** ${entry.weather.temp} — ${entry.weather.desc}\n` +
+    `**Location:** ${entry.weather.loc}\n\n` +
+    `## Crew Notes\n${entry.crewNotes || '_none logged_'}\n\n` +
+    `## Tasks\n${openTasks || '_none open_'}\n${doneTasks}\n\n` +
+    `## Problems & Solutions\n${probs || '_none logged_'}\n\n` +
+    `---\n*Saved ${entry.savedAt}*\n`;
+}
+
 async function saveLog(){
   const status = document.getElementById('statusMsg');
   const date = document.getElementById('logDate').value || todayStr();
@@ -542,14 +699,33 @@ async function saveLog(){
     tasks, problems,
     savedAt: new Date().toISOString()
   };
+
+  // Always keep a local cache so "Past Logs" works even offline.
   const key = `joblog:${date}_${foreman}_${job}`.replace(/\s+/g,'_');
-  try{
-    localStorage.setItem(key, JSON.stringify(entry));
-    status.textContent = `Saved: ${job} — ${foreman} — ${date}. (Phase 1: local only)`;
+  try{ localStorage.setItem(key, JSON.stringify(entry)); }catch(e){ /* non-fatal */ }
+
+  if(!accessToken){
+    status.textContent = `Saved locally only — sign in with Google to write this into the PLS vault.`;
     loadHistory();
-  }catch(err){
-    status.textContent = 'Save error: ' + err.message;
+    return;
   }
+
+  status.textContent = 'Saving to the PLS vault...';
+  try{
+    const md = entryToMarkdown(entry);
+    const jobFolderId = await findFolder(job, ACTIVE_JOBS_ID);
+    if(!jobFolderId) throw new Error(`Could not find "${job}" under 03 Active Jobs in Drive.`);
+    const perJobLogsId = await findOrCreateFolder('08 Job Logs', jobFolderId);
+    await createFileInFolder(`${date}_${foreman}.md`, perJobLogsId, md);
+
+    const centralId = await getCentralLogsFolder();
+    await createFileInFolder(`${date}_${foreman}_${job}.md`, centralId, md);
+
+    status.textContent = `Saved to vault: ${job} — ${foreman} — ${date} (and to 04 Foreman Daily Logs).`;
+  }catch(err){
+    status.textContent = 'Saved locally, but vault write failed: ' + err.message;
+  }
+  loadHistory();
 }
 document.getElementById('saveBtn').addEventListener('click', saveLog);
 
