@@ -486,11 +486,70 @@ function populateJobs(){
   [...JOBS, ...customJobs].forEach(j => {
     const opt = document.createElement('option');
     opt.value = j.name;
-    opt.textContent = j.name;
+    opt.textContent = j.loc && j.loc !== 'TBD' ? `${j.name} — ${j.loc}` : j.name;
     sel.appendChild(opt);
   });
 }
 populateJobs();
+
+// ---------- Draft autosave (survives closing the app before end-of-day Save) ----------
+const DRAFT_KEY = 'joblog_draft_v1';
+
+function saveDraft(){
+  const draft = {
+    date: document.getElementById('logDate').value,
+    foreman: document.getElementById('foreman').value,
+    job: document.getElementById('jobSelect').value,
+    crewNotes: document.getElementById('crewNotes').value,
+    tasks, problems,
+    weather: {
+      temp: document.getElementById('wTemp').textContent,
+      desc: document.getElementById('wDesc').textContent,
+      loc: document.getElementById('wLoc').textContent
+    },
+    coords
+  };
+  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); }catch(e){ /* non-fatal */ }
+}
+
+function clearDraft(){
+  try{ localStorage.removeItem(DRAFT_KEY); }catch(e){ /* non-fatal */ }
+}
+
+function restoreDraft(){
+  let draft;
+  try{ draft = JSON.parse(localStorage.getItem(DRAFT_KEY)); }catch(e){ return; }
+  if(!draft) return;
+  if(draft.date) document.getElementById('logDate').value = draft.date;
+  if(draft.foreman) document.getElementById('foreman').value = draft.foreman;
+  if(draft.job){
+    document.getElementById('jobSelect').value = draft.job;
+    const job = [...JOBS, ...customJobs].find(j => j.name === draft.job);
+    if(job) showJobInfo(job);
+  }
+  if(draft.crewNotes) document.getElementById('crewNotes').value = draft.crewNotes;
+  if(draft.weather){
+    document.getElementById('wTemp').textContent = draft.weather.temp || '--°';
+    document.getElementById('wDesc').textContent = draft.weather.desc || 'No weather yet';
+    document.getElementById('wLoc').textContent = draft.weather.loc || 'Location not set';
+  }
+  coords = draft.coords || null;
+  tasks = draft.tasks || [];
+  problems = draft.problems || [];
+  renderTasks();
+  renderProblems();
+  if(draft.job || draft.crewNotes || tasks.length || problems.length){
+    document.getElementById('statusMsg').textContent = 'Restored your unsaved entry from earlier — keep going or Save when ready.';
+  }
+}
+
+// Autosave on any change to the main fields.
+['logDate','foreman','jobSelect','crewNotes'].forEach(id => {
+  document.getElementById(id).addEventListener('input', saveDraft);
+  document.getElementById(id).addEventListener('change', saveDraft);
+});
+
+restoreDraft();
 
 document.getElementById('toggleNewJob').addEventListener('click', () => {
   document.getElementById('newJobRow').classList.toggle('show');
@@ -539,6 +598,7 @@ document.getElementById('jobSelect').addEventListener('change', e => {
 function renderTasks(){
   const list = document.getElementById('taskList');
   list.innerHTML = '';
+  if(typeof saveDraft === 'function') saveDraft();
   if(tasks.length === 0){
     list.innerHTML = '<div class="empty">No tasks yet.</div>';
     return;
@@ -581,6 +641,7 @@ document.getElementById('newTask').addEventListener('keydown', e => {
 function renderProblems(){
   const list = document.getElementById('probList');
   list.innerHTML = '';
+  if(typeof saveDraft === 'function') saveDraft();
   if(problems.length === 0){
     list.innerHTML = '<div class="empty">No issues logged.</div>';
     return;
@@ -706,6 +767,7 @@ async function saveLog(){
 
   if(!accessToken){
     status.textContent = `Saved locally only — sign in with Google to write this into the PLS vault.`;
+    clearDraft();
     loadHistory();
     return;
   }
@@ -722,8 +784,9 @@ async function saveLog(){
     await createFileInFolder(`${date}_${foreman}_${job}.md`, centralId, md);
 
     status.textContent = `Saved to vault: ${job} — ${foreman} — ${date} (and to 04 Foreman Daily Logs).`;
+    clearDraft();
   }catch(err){
-    status.textContent = 'Saved locally, but vault write failed: ' + err.message;
+    status.textContent = 'Saved locally, but vault write failed: ' + err.message + ' — your entry is still here, try Save again.';
   }
   loadHistory();
 }
@@ -743,6 +806,7 @@ function clearForm(){
   problems = [];
   renderTasks();
   renderProblems();
+  clearDraft();
   document.getElementById('statusMsg').textContent = 'Cleared. Ready for a new log.';
 }
 document.getElementById('newLogBtn').addEventListener('click', clearForm);
