@@ -338,7 +338,7 @@
 </div>
 
 <script>
-// ---------- Job list (mirrors 03 Active Jobs in the PLS vault, as of 2026-07-12) ----------
+// ---------- Job list (mirrors 03 Active Jobs in the PLS vault, as of 2026-07-20) ----------
 // Phase 2: replace this static list with a live read of the Drive folder.
 // ---------- Google Drive Auth ----------
 const CLIENT_ID = '97797932296-brgolmj9u4tp406c3kvmuj44l6ou0pul.apps.googleusercontent.com';
@@ -458,6 +458,13 @@ async function createNewJobSkeleton(jobName){
 }
 
 const JOBS = [
+  { name:"Pomeroy", po:"25032", gc:"RDR", owner:"Village of Pomeroy", loc:"Pomeroy, Meigs County, OH" },
+  { name:"26005 - Pomeroy SR 833 Wet Well Platforms", po:"26005", gc:"RDR", owner:"Village of Pomeroy", loc:"Pomeroy, Meigs County, OH" },
+  { name:"26008 - Nelsonville Sewer Improvements", po:"26008", gc:"RDR", owner:"City of Nelsonville", loc:"Nelsonville, OH" },
+  { name:"26003 - Valley Falls Water System Improvements", po:"26003", gc:"RDR", owner:"Valley Falls PSD", loc:"Marion County, WV" },
+  { name:"26013 - Meigs HS Wet Well Electric Service", po:"26013", gc:"RDR", owner:"Village of Pomeroy", loc:"Pomeroy, Meigs County, OH" },
+  { name:"26021 - Woodsfield Backwash System Improvements", po:"26021", gc:"RDR", owner:"Village of Woodsfield", loc:"Monroe County, OH" },
+  { name:"26006 - Highland Ridge Waterline Extensions", po:"26006", gc:"RDR", owner:"Highland Ridge Water Association", loc:"Lowell, OH" },
   { name:"26010 - McGill Park Phase 2", po:"26010", gc:"Tucson, Inc.", owner:"City of Canal Winchester", loc:"Canal Winchester, OH" },
   { name:"25005 - Wooster-Sterling Wastewater", po:"25005", gc:"Tucson, Inc.", owner:"Wayne Co. Board of Commissioners", loc:"Sterling, OH" },
   { name:"25017 - Coshocton Warsaw Booster", po:"25017", gc:"Tucson, Inc.", owner:"City of Coshocton", loc:"Coshocton, OH" },
@@ -465,10 +472,6 @@ const JOBS = [
   { name:"25019 - Caldwell Raw Water Dosing Station", po:"25019", gc:"Dunlap", owner:"Village of Caldwell", loc:"Caldwell, OH" },
   { name:"26020 - Union Williams Waverly", po:"26020", gc:"Dunlap", owner:"Union Williams PSD", loc:"Waverly, WV" },
   { name:"26015 - Chaseville Tank", po:"26015", gc:"Dunlap", owner:"Noble County Water Authority", loc:"Buffalo Township, OH" },
-  { name:"26003 - Valley Falls Water System Improvements", po:"26003", gc:"RDR", owner:"Valley Falls PSD", loc:"Marion County, WV" },
-  { name:"26013 - Meigs HS Wet Well Electric Service", po:"26013", gc:"RDR", owner:"Village of Pomeroy", loc:"Pomeroy, Meigs County, OH" },
-  { name:"26021 - Woodsfield Backwash System Improvements", po:"26021", gc:"RDR", owner:"Village of Woodsfield", loc:"Monroe County, OH" },
-  { name:"26006 - Highland Ridge Waterline Extensions", po:"26006", gc:"RDR", owner:"Highland Ridge Water Association", loc:"Lowell, OH" },
   { name:"25026 - Jackson County Water Phase 8B", po:"25026", gc:"Little Creek", owner:"Jackson County Water Co.", loc:"Jackson & Vinton Counties, OH" }
 ];
 
