@@ -287,6 +287,7 @@
       </div>
     </div>
     <button class="btn ghost small" id="toggleNewJob" style="margin:-8px 0 14px;">+ New job not on this list</button>
+    <button class="btn ghost small" id="refreshJobsBtn" style="margin:-8px 0 14px;">↻ Refresh job list</button>
 
     <div class="job-info" id="jobInfo">
       <div class="jrow"><span class="jlabel">PO#</span><span id="jiPO">—</span></div>
@@ -338,7 +339,7 @@
 </div>
 
 <script>
-// ---------- Job list (mirrors 03 Active Jobs in the PLS vault, as of 2026-07-20) ----------
+// ---------- Job list (mirrors 03 Active Jobs in the PLS vault, as of 2026-07-12) ----------
 // Phase 2: replace this static list with a live read of the Drive folder.
 // ---------- Google Drive Auth ----------
 const CLIENT_ID = '97797932296-brgolmj9u4tp406c3kvmuj44l6ou0pul.apps.googleusercontent.com';
@@ -372,6 +373,7 @@ function initGoogleAuth(){
       if(resp && resp.access_token){
         accessToken = resp.access_token;
         setAuthStatus(true, 'Signed in — logs save to the PLS vault');
+        refreshJobsFromDrive();
       } else {
         setAuthStatus(false, 'Sign-in failed — tap to retry');
       }
@@ -458,13 +460,6 @@ async function createNewJobSkeleton(jobName){
 }
 
 const JOBS = [
-  { name:"Pomeroy", po:"25032", gc:"RDR", owner:"Village of Pomeroy", loc:"Pomeroy, Meigs County, OH" },
-  { name:"26005 - Pomeroy SR 833 Wet Well Platforms", po:"26005", gc:"RDR", owner:"Village of Pomeroy", loc:"Pomeroy, Meigs County, OH" },
-  { name:"26008 - Nelsonville Sewer Improvements", po:"26008", gc:"RDR", owner:"City of Nelsonville", loc:"Nelsonville, OH" },
-  { name:"26003 - Valley Falls Water System Improvements", po:"26003", gc:"RDR", owner:"Valley Falls PSD", loc:"Marion County, WV" },
-  { name:"26013 - Meigs HS Wet Well Electric Service", po:"26013", gc:"RDR", owner:"Village of Pomeroy", loc:"Pomeroy, Meigs County, OH" },
-  { name:"26021 - Woodsfield Backwash System Improvements", po:"26021", gc:"RDR", owner:"Village of Woodsfield", loc:"Monroe County, OH" },
-  { name:"26006 - Highland Ridge Waterline Extensions", po:"26006", gc:"RDR", owner:"Highland Ridge Water Association", loc:"Lowell, OH" },
   { name:"26010 - McGill Park Phase 2", po:"26010", gc:"Tucson, Inc.", owner:"City of Canal Winchester", loc:"Canal Winchester, OH" },
   { name:"25005 - Wooster-Sterling Wastewater", po:"25005", gc:"Tucson, Inc.", owner:"Wayne Co. Board of Commissioners", loc:"Sterling, OH" },
   { name:"25017 - Coshocton Warsaw Booster", po:"25017", gc:"Tucson, Inc.", owner:"City of Coshocton", loc:"Coshocton, OH" },
@@ -472,7 +467,12 @@ const JOBS = [
   { name:"25019 - Caldwell Raw Water Dosing Station", po:"25019", gc:"Dunlap", owner:"Village of Caldwell", loc:"Caldwell, OH" },
   { name:"26020 - Union Williams Waverly", po:"26020", gc:"Dunlap", owner:"Union Williams PSD", loc:"Waverly, WV" },
   { name:"26015 - Chaseville Tank", po:"26015", gc:"Dunlap", owner:"Noble County Water Authority", loc:"Buffalo Township, OH" },
-  { name:"25026 - Jackson County Water Phase 8B", po:"25026", gc:"Little Creek", owner:"Jackson County Water Co.", loc:"Jackson & Vinton Counties, OH" }
+  { name:"26003 - Valley Falls Water System Improvements", po:"26003", gc:"RDR", owner:"Valley Falls PSD", loc:"Marion County, WV" },
+  { name:"26013 - Meigs HS Wet Well Electric Service", po:"26013", gc:"RDR", owner:"Village of Pomeroy", loc:"Pomeroy, Meigs County, OH" },
+  { name:"26021 - Woodsfield Backwash System Improvements", po:"26021", gc:"RDR", owner:"Village of Woodsfield", loc:"Monroe County, OH" },
+  { name:"26006 - Highland Ridge Waterline Extensions", po:"26006", gc:"RDR", owner:"Highland Ridge Water Association", loc:"Lowell, OH" },
+  { name:"25026 - Jackson County Water Phase 8B", po:"25026", gc:"Little Creek", owner:"Jackson County Water Co.", loc:"Jackson & Vinton Counties, OH" },
+  { name:"25032 - Pomeroy SR 833 Sewer Extensions Ph III", po:"25032", gc:"RDR", owner:"Village of Pomeroy", loc:"Meigs County, OH — S.R. 833" }
 ];
 
 let customJobs = [];
@@ -494,6 +494,58 @@ function populateJobs(){
   });
 }
 populateJobs();
+
+// ---------- Live job list from Drive (falls back to the static list above) ----------
+const JOBS_CACHE_KEY = 'vault_jobs_cache_v1';
+
+function loadCachedJobs(){
+  try{
+    const cached = JSON.parse(localStorage.getItem(JOBS_CACHE_KEY));
+    if(cached && Array.isArray(cached.jobs) && cached.jobs.length){
+      JOBS.length = 0;
+      cached.jobs.forEach(j => JOBS.push(j));
+      populateJobs();
+      const status = document.getElementById('statusMsg');
+      if(status) status.textContent = `Job list loaded from cache (last synced ${new Date(cached.syncedAt).toLocaleString()}).`;
+    }
+  }catch(e){ /* non-fatal, static list stays as-is */ }
+}
+
+async function refreshJobsFromDrive(){
+  const status = document.getElementById('statusMsg');
+  if(!accessToken) return;
+  status.textContent = 'Checking 03 Active Jobs in the vault for updates...';
+  try{
+    const q = encodeURIComponent(`'${ACTIVE_JOBS_ID}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`);
+    const data = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=200&orderBy=name`);
+    const folders = data.files || [];
+    if(folders.length === 0) return; // don't wipe the list on an empty/failed response
+
+    // Keep known details (po/gc/owner/loc) for jobs we already recognize;
+    // new folders show up with placeholders until someone fills in 00 Project Home.
+    const existingByName = {};
+    JOBS.forEach(j => existingByName[j.name] = j);
+
+    const freshList = folders.map(f => {
+      const known = existingByName[f.name];
+      return known || { name: f.name, po:'—', gc:'—', owner:'—', loc:'TBD' };
+    });
+
+    JOBS.length = 0;
+    freshList.forEach(j => JOBS.push(j));
+    populateJobs();
+
+    try{
+      localStorage.setItem(JOBS_CACHE_KEY, JSON.stringify({ jobs: freshList, syncedAt: new Date().toISOString() }));
+    }catch(e){ /* non-fatal */ }
+
+    status.textContent = `Job list synced from the vault — ${freshList.length} active jobs found.`;
+  }catch(err){
+    status.textContent = 'Could not refresh job list from vault: ' + err.message;
+  }
+}
+
+loadCachedJobs();
 
 // ---------- Draft autosave (survives closing the app before end-of-day Save) ----------
 const DRAFT_KEY = 'joblog_draft_v1';
@@ -556,6 +608,14 @@ restoreDraft();
 
 document.getElementById('toggleNewJob').addEventListener('click', () => {
   document.getElementById('newJobRow').classList.toggle('show');
+});
+
+document.getElementById('refreshJobsBtn').addEventListener('click', () => {
+  if(!accessToken){
+    document.getElementById('statusMsg').textContent = 'Sign in with Google first to sync the job list from the vault.';
+    return;
+  }
+  refreshJobsFromDrive();
 });
 
 document.getElementById('addJobBtn').addEventListener('click', async () => {
