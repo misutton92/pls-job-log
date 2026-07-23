@@ -374,6 +374,10 @@ function initGoogleAuth(){
         accessToken = resp.access_token;
         setAuthStatus(true, 'Signed in — logs save to the PLS vault');
         refreshJobsFromDrive();
+        // Sign-in often finishes after the page's initial load — if a job/foreman
+        // is already selected, re-check the vault now for today's existing entry.
+        const currentJob = document.getElementById('jobSelect').value;
+        if(currentJob) handleJobSwitch(currentJob);
       } else {
         setAuthStatus(false, 'Sign-in failed — tap to retry');
       }
@@ -443,11 +447,46 @@ async function createFileInFolder(name, parentId, content, mimeType = 'text/mark
   });
 }
 
+async function findFileInFolder(name, parentId){
+  const q = encodeURIComponent(`'${parentId}' in parents and name = '${name.replace(/'/g,"\\'")}' and trashed = false`);
+  const data = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`);
+  return (data.files && data.files[0]) ? data.files[0].id : null;
+}
+
+async function updateFileContent(fileId, content, mimeType = 'text/markdown'){
+  return await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': mimeType },
+    body: content
+  });
+}
+
+async function readFileContent(fileId){
+  if(!accessToken) throw new Error('Not signed in to Google Drive yet.');
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { 'Authorization': 'Bearer ' + accessToken }
+  });
+  if(!res.ok) throw new Error('Drive read error ' + res.status);
+  return res.text();
+}
+
+// Create-or-overwrite: one file per job per day, no matter how many times it's saved.
+async function saveOrUpdateFile(name, parentId, content, mimeType = 'text/markdown'){
+  const existingId = await findFileInFolder(name, parentId);
+  if(existingId){
+    await updateFileContent(existingId, content, mimeType);
+    return existingId;
+  }
+  const created = await createFileInFolder(name, parentId, content, mimeType);
+  return created.id;
+}
+
 async function getCentralLogsFolder(){
   if(centralLogsFolderId) return centralLogsFolderId;
   centralLogsFolderId = await findOrCreateFolder('04 Foreman Daily Logs', VAULT_ROOT_ID);
   return centralLogsFolderId;
 }
+
 
 async function createNewJobSkeleton(jobName){
   const jobFolderId = await createFolder(jobName, ACTIVE_JOBS_ID);
@@ -547,14 +586,20 @@ async function refreshJobsFromDrive(){
 
 loadCachedJobs();
 
-// ---------- Draft autosave (survives closing the app before end-of-day Save) ----------
-const DRAFT_KEY = 'joblog_draft_v1';
+// ---------- Draft autosave (survives closing the app / switching jobs before Save) ----------
+// Keyed per job so switching jobs never wipes out other in-progress work.
+let currentDraftJob = '';
+
+function draftKeyFor(job){
+  return 'joblog_draft_v1:' + (job || '__no_job__');
+}
 
 function saveDraft(){
+  const job = document.getElementById('jobSelect').value;
   const draft = {
     date: document.getElementById('logDate').value,
     foreman: document.getElementById('foreman').value,
-    job: document.getElementById('jobSelect').value,
+    job,
     crewNotes: document.getElementById('crewNotes').value,
     tasks, problems,
     weather: {
@@ -562,26 +607,20 @@ function saveDraft(){
       desc: document.getElementById('wDesc').textContent,
       loc: document.getElementById('wLoc').textContent
     },
-    coords
+    coords,
+    existingFileFound: !!currentEntryExists
   };
-  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); }catch(e){ /* non-fatal */ }
+  try{ localStorage.setItem(draftKeyFor(job || currentDraftJob), JSON.stringify(draft)); }catch(e){ /* non-fatal */ }
 }
 
-function clearDraft(){
-  try{ localStorage.removeItem(DRAFT_KEY); }catch(e){ /* non-fatal */ }
+function clearDraft(job){
+  try{ localStorage.removeItem(draftKeyFor(job)); }catch(e){ /* non-fatal */ }
 }
 
-function restoreDraft(){
-  let draft;
-  try{ draft = JSON.parse(localStorage.getItem(DRAFT_KEY)); }catch(e){ return; }
-  if(!draft) return;
+function applyDraftToForm(draft){
+  if(!draft) return false;
   if(draft.date) document.getElementById('logDate').value = draft.date;
   if(draft.foreman) document.getElementById('foreman').value = draft.foreman;
-  if(draft.job){
-    document.getElementById('jobSelect').value = draft.job;
-    const job = [...JOBS, ...customJobs].find(j => j.name === draft.job);
-    if(job) showJobInfo(job);
-  }
   if(draft.crewNotes) document.getElementById('crewNotes').value = draft.crewNotes;
   if(draft.weather){
     document.getElementById('wTemp').textContent = draft.weather.temp || '--°';
@@ -593,16 +632,93 @@ function restoreDraft(){
   problems = draft.problems || [];
   renderTasks();
   renderProblems();
-  if(draft.job || draft.crewNotes || tasks.length || problems.length){
-    document.getElementById('statusMsg').textContent = 'Restored your unsaved entry from earlier — keep going or Save when ready.';
-  }
+  return !!(draft.crewNotes || tasks.length || problems.length);
+}
+
+function restoreDraft(){
+  // On first load, reopen whatever job was last open — same logic as switching jobs,
+  // so if it was already saved to the vault today, we pull the real thing, not a stale local copy.
+  let lastJobKey;
+  try{ lastJobKey = localStorage.getItem('joblog_last_job_v1'); }catch(e){ lastJobKey = null; }
+  if(!lastJobKey) return;
+  document.getElementById('jobSelect').value = lastJobKey;
+  handleJobSwitch(lastJobKey);
 }
 
 // Autosave on any change to the main fields.
-['logDate','foreman','jobSelect','crewNotes'].forEach(id => {
+['logDate','foreman','crewNotes'].forEach(id => {
   document.getElementById(id).addEventListener('input', saveDraft);
   document.getElementById(id).addEventListener('change', saveDraft);
 });
+
+// When switching jobs: save the outgoing job's draft, then either reopen
+// today's already-saved vault entry for the new job, restore its local
+// draft, or start blank — never silently lose whatever was in progress.
+let currentEntryExists = null; // fileId of an existing today's log for the current job, if any
+
+async function handleJobSwitch(newJobName){
+  // Save whatever was on screen under the OLD job before switching away.
+  if(currentDraftJob){
+    saveDraft();
+  }
+  currentDraftJob = newJobName;
+  try{ localStorage.setItem('joblog_last_job_v1', newJobName); }catch(e){ /* non-fatal */ }
+  currentEntryExists = null;
+
+  const job = [...JOBS, ...customJobs].find(j => j.name === newJobName);
+  showJobInfo(job);
+
+  const status = document.getElementById('statusMsg');
+  const date = document.getElementById('logDate').value || todayStr();
+  const foreman = document.getElementById('foreman').value;
+
+  // Reset the entry-specific fields before loading whatever's appropriate.
+  document.getElementById('crewNotes').value = '';
+  document.getElementById('wTemp').textContent = '--°';
+  document.getElementById('wDesc').textContent = 'No weather yet';
+  document.getElementById('wLoc').textContent = 'Location not set';
+  coords = null;
+  tasks = [];
+  problems = [];
+
+  // 1) If signed in and a foreman's picked, check the vault for an entry
+  //    already saved today for this job — reopen it instead of starting over.
+  if(accessToken && foreman && newJobName){
+    status.textContent = 'Checking the vault for an existing log today...';
+    try{
+      const jobFolderId = await findFolder(newJobName, ACTIVE_JOBS_ID);
+      if(jobFolderId){
+        const perJobLogsId = await findOrCreateFolder('08 Job Logs', jobFolderId);
+        const fname = `${date}_${foreman}.md`;
+        const existingId = await findFileInFolder(fname, perJobLogsId);
+        if(existingId){
+          const content = await readFileContent(existingId);
+          const parsed = parseLogMarkdown(content);
+          if(parsed){
+            applyDraftToForm(parsed);
+            currentEntryExists = existingId;
+            status.textContent = `Reopened today's existing log for ${newJobName} — edit and Save to update it.`;
+            return;
+          }
+        }
+      }
+    }catch(err){
+      // fall through to local draft / blank — don't block the foreman over a network hiccup
+    }
+  }
+
+  // 2) No existing vault entry (or not signed in yet) — fall back to a local draft for this job.
+  let draft;
+  try{ draft = JSON.parse(localStorage.getItem(draftKeyFor(newJobName))); }catch(e){ draft = null; }
+  const hadContent = applyDraftToForm(draft);
+  if(hadContent){
+    status.textContent = 'Restored your unsaved entry for this job from earlier — keep going or Save when ready.';
+  } else {
+    status.textContent = newJobName ? `Starting a fresh entry for ${newJobName}.` : '';
+  }
+  renderTasks();
+  renderProblems();
+}
 
 restoreDraft();
 
@@ -653,8 +769,7 @@ function showJobInfo(job){
 }
 
 document.getElementById('jobSelect').addEventListener('change', e => {
-  const job = [...JOBS, ...customJobs].find(j => j.name === e.target.value);
-  showJobInfo(job);
+  handleJobSwitch(e.target.value);
 });
 
 // ---------- Tasks ----------
@@ -663,6 +778,7 @@ function renderTasks(){
   list.innerHTML = '';
   if(typeof saveDraft === 'function') saveDraft();
   if(tasks.length === 0){
+
     list.innerHTML = '<div class="empty">No tasks yet.</div>';
     return;
   }
@@ -793,6 +909,11 @@ function entryToMarkdown(entry){
     const resolved = p.solution && p.solution.trim() !== '';
     return `**${resolved ? 'Resolved' : 'Open'}:** ${p.problem}` + (resolved ? `\n> Solution: ${p.solution}` : '');
   }).join('\n\n');
+  const dataBlock = JSON.stringify({
+    date: entry.date, foreman: entry.foreman, job: entry.job,
+    weather: entry.weather, crewNotes: entry.crewNotes,
+    tasks: entry.tasks, problems: entry.problems
+  });
   return `# Daily Log — ${entry.date} — ${entry.foreman}\n\n` +
     `**Job:** ${entry.job}\n` +
     `**Weather:** ${entry.weather.temp} — ${entry.weather.desc}\n` +
@@ -800,7 +921,14 @@ function entryToMarkdown(entry){
     `## Crew Notes\n${entry.crewNotes || '_none logged_'}\n\n` +
     `## Tasks\n${openTasks || '_none open_'}\n${doneTasks}\n\n` +
     `## Problems & Solutions\n${probs || '_none logged_'}\n\n` +
-    `---\n*Saved ${entry.savedAt}*\n`;
+    `---\n*Last updated ${entry.savedAt}*\n` +
+    `<!-- LOGDATA:${dataBlock} -->\n`;
+}
+
+function parseLogMarkdown(md){
+  const match = md.match(/<!-- LOGDATA:(.*?) -->/s);
+  if(!match) return null;
+  try{ return JSON.parse(match[1]); }catch(e){ return null; }
 }
 
 async function saveLog(){
@@ -841,13 +969,13 @@ async function saveLog(){
     const jobFolderId = await findFolder(job, ACTIVE_JOBS_ID);
     if(!jobFolderId) throw new Error(`Could not find "${job}" under 03 Active Jobs in Drive.`);
     const perJobLogsId = await findOrCreateFolder('08 Job Logs', jobFolderId);
-    await createFileInFolder(`${date}_${foreman}.md`, perJobLogsId, md);
+    await saveOrUpdateFile(`${date}_${foreman}.md`, perJobLogsId, md);
 
     const centralId = await getCentralLogsFolder();
-    await createFileInFolder(`${date}_${foreman}_${job}.md`, centralId, md);
+    await saveOrUpdateFile(`${date}_${foreman}_${job}.md`, centralId, md);
 
-    status.textContent = `Saved to vault: ${job} — ${foreman} — ${date} (and to 04 Foreman Daily Logs).`;
-    clearDraft();
+    status.textContent = `Saved to vault: ${job} — ${foreman} — ${date} (and to 04 Foreman Daily Logs). Save again anytime today to update this same entry.`;
+    clearDraft(job);
   }catch(err){
     status.textContent = 'Saved locally, but vault write failed: ' + err.message + ' — your entry is still here, try Save again.';
   }
@@ -856,6 +984,7 @@ async function saveLog(){
 document.getElementById('saveBtn').addEventListener('click', saveLog);
 
 function clearForm(){
+  const outgoingJob = document.getElementById('jobSelect').value || currentDraftJob;
   document.getElementById('logDate').value = todayStr();
   document.getElementById('foreman').value = '';
   document.getElementById('jobSelect').value = '';
@@ -869,7 +998,10 @@ function clearForm(){
   problems = [];
   renderTasks();
   renderProblems();
-  clearDraft();
+  if(outgoingJob) clearDraft(outgoingJob);
+  currentDraftJob = '';
+  currentEntryExists = null;
+  try{ localStorage.removeItem('joblog_last_job_v1'); }catch(e){ /* non-fatal */ }
   document.getElementById('statusMsg').textContent = 'Cleared. Ready for a new log.';
 }
 document.getElementById('newLogBtn').addEventListener('click', clearForm);
